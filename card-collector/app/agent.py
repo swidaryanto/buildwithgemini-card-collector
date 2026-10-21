@@ -27,6 +27,7 @@ from google.auth.transport.requests import AuthorizedSession
 from google.adk.agents import Agent
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.apps import App
+from google.adk.memory.vertex_ai_memory_bank_service import VertexAiMemoryBankService
 from google.adk.models import Gemini
 from google.adk.tools.preload_memory_tool import PreloadMemoryTool
 from google.adk.tools.tool_context import ToolContext
@@ -48,9 +49,9 @@ IMAGE_LOCATION = "global"
 VIDEO_MODEL = "gemini-omni-flash-preview"
 VIDEO_LOCATION = "global"
 AGENT_ENGINE_RESOURCE = (
-    "projects/689344436861/locations/us-east1/reasoningEngines/3263679265215873024"
+    "projects/689344436861/locations/us-east1/reasoningEngines/5848463976349827072"
 )
-MEMORY_BANK_ID = "3263679265215873024"
+MEMORY_BANK_ID = "5848463976349827072"
 
 
 def _get_firestore_client() -> firestore.Client:

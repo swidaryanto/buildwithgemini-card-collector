@@ -24,7 +24,12 @@ Run:
   python main.py                 # -> http://localhost:8080
 """
 
+from __future__ import annotations
+
+import json
 import os
+import re
+from typing import Any, Optional
 import uuid
 
 import google.auth
@@ -117,62 +122,91 @@ async def _get_card(client: httpx.AsyncClient) -> AgentCard:
 
 import re
 
+def _handle_a2ui_obj(parsed: Any, out_list: list) -> None:
+    if not parsed:
+        return
+    if isinstance(parsed, bytes):
+        try:
+            parsed = parsed.decode("utf-8")
+        except Exception:
+            return
+    if isinstance(parsed, str):
+        if "<a2a_datapart_json>" in parsed:
+            for match in re.finditer(r"<a2a_datapart_json>\s*(.*?)\s*</a2a_datapart_json>", parsed, re.DOTALL):
+                try:
+                    _handle_a2ui_obj(json.loads(match.group(1)), out_list)
+                except Exception:
+                    pass
+            return
+        if "<a2ui-json>" in parsed:
+            for match in re.finditer(r"<a2ui-json>\s*(.*?)\s*</a2ui-json>", parsed, re.DOTALL):
+                try:
+                    _handle_a2ui_obj(json.loads(match.group(1)), out_list)
+                except Exception:
+                    pass
+            return
+        try:
+            parsed = json.loads(parsed)
+        except Exception:
+            return
+
+    if isinstance(parsed, list):
+        root_id = parsed[0].get("id") if (parsed and isinstance(parsed[0], dict)) else None
+        sid = f"surface_{len(out_list)}"
+        out_list.append({"kind": "a2ui", "data": {"beginRendering": {"surfaceId": sid, "root": root_id}}})
+        out_list.append({"kind": "a2ui", "data": {"surfaceUpdate": {"surfaceId": sid, "components": parsed}}})
+    elif isinstance(parsed, dict):
+        if "data" in parsed and isinstance(parsed["data"], (dict, list, str, bytes)):
+            _handle_a2ui_obj(parsed["data"], out_list)
+        elif "beginRendering" in parsed or "surfaceUpdate" in parsed:
+            out_list.append({"kind": "a2ui", "data": parsed})
+        elif "components" in parsed:
+            sid = parsed.get("surfaceId", f"surface_{len(out_list)}")
+            comps = parsed.get("components", [])
+            root_id = comps[0].get("id") if (comps and isinstance(comps[0], dict)) else None
+            out_list.append({"kind": "a2ui", "data": {"beginRendering": {"surfaceId": sid, "root": root_id}}})
+            out_list.append({"kind": "a2ui", "data": {"surfaceUpdate": {"surfaceId": sid, "components": comps}}})
+
+
 def _extract_parts(parts: list) -> list[dict]:
     """Turn A2A response parts into structured parts for the chat UI."""
     out: list[dict] = []
     for p in parts:
         root = getattr(p, "root", p)
-        if isinstance(root, TextPart) or hasattr(root, "text"):
-            text_val = getattr(root, "text", "") or ""
-            # Extract any embedded a2ui json or a2a_datapart_json if present
-            if "<a2a_datapart_json>" in text_val:
-                match = re.search(r"<a2a_datapart_json>\s*(.*?)\s*</a2a_datapart_json>", text_val, re.DOTALL)
-                if match:
-                    try:
-                        parsed = json.loads(match.group(1))
-                        d = parsed.get("data") if isinstance(parsed, dict) else parsed
-                        if d:
-                            out.append({"kind": "a2ui", "data": d})
-                    except Exception:
-                        pass
-                clean_text = re.sub(r"<a2a_datapart_json>.*?</a2a_datapart_json>", "", text_val, flags=re.DOTALL).strip()
-                if clean_text:
-                    out.append({"kind": "text", "text": clean_text})
-            elif "<a2ui-json>" in text_val:
-                match = re.search(r"<a2ui-json>\s*(.*?)\s*</a2ui-json>", text_val, re.DOTALL)
-                if match:
-                    try:
-                        parsed = json.loads(match.group(1))
-                        # convert schema format to beginRendering/surfaceUpdate if needed
-                        if isinstance(parsed, dict) and "surfaceId" in parsed and "components" in parsed:
-                            sid = parsed.get("surfaceId", "surface")
-                            comps = parsed.get("components", [])
-                            root_id = comps[0].get("id") if comps else None
-                            out.append({"kind": "a2ui", "data": {"beginRendering": {"surfaceId": sid, "root": root_id}}})
-                            out.append({"kind": "a2ui", "data": {"surfaceUpdate": {"surfaceId": sid, "components": comps}}})
-                    except Exception:
-                        pass
-                clean_text = re.sub(r"<a2ui-json>.*?</a2ui-json>", "", text_val, flags=re.DOTALL).strip()
-                if clean_text:
-                    out.append({"kind": "text", "text": clean_text})
-            elif text_val:
-                out.append({"kind": "text", "text": text_val})
+        text_val = getattr(root, "text", "") or ""
+        if isinstance(root, dict) and "text" in root:
+            text_val = root["text"]
+
+        if text_val:
+            # Extract all embedded a2ui json or a2a_datapart_json tags
+            for match in re.finditer(r"<a2a_datapart_json>\s*(.*?)\s*</a2a_datapart_json>", text_val, re.DOTALL):
+                try:
+                    parsed = json.loads(match.group(1))
+                    _handle_a2ui_obj(parsed, out)
+                except Exception:
+                    pass
+            for match in re.finditer(r"<a2ui-json>\s*(.*?)\s*</a2ui-json>", text_val, re.DOTALL):
+                try:
+                    parsed = json.loads(match.group(1))
+                    _handle_a2ui_obj(parsed, out)
+                except Exception:
+                    pass
+            
+            clean_text = re.sub(r"<a2a_datapart_json>.*?</a2a_datapart_json>", "", text_val, flags=re.DOTALL)
+            clean_text = re.sub(r"<a2ui-json>.*?</a2ui-json>", "", clean_text, flags=re.DOTALL).strip()
+            if clean_text:
+                out.append({"kind": "text", "text": clean_text})
         elif getattr(root, "data", None) is not None:
             data_val = root.data
-            if isinstance(data_val, dict):
-                inner = data_val.get("data") if isinstance(data_val.get("data"), dict) else data_val
-                if "beginRendering" in inner or "surfaceUpdate" in inner:
-                    out.append({"kind": "a2ui", "data": inner})
-                elif "components" in inner and "surfaceId" in inner:
-                    sid = inner.get("surfaceId", "surface")
-                    comps = inner.get("components", [])
-                    root_id = comps[0].get("id") if comps else None
-                    out.append({"kind": "a2ui", "data": {"beginRendering": {"surfaceId": sid, "root": root_id}}})
-                    out.append({"kind": "a2ui", "data": {"surfaceUpdate": {"surfaceId": sid, "components": comps}}})
-        elif isinstance(root, FilePart):
-            uri = getattr(getattr(root, "file", None), "uri", None)
+            _handle_a2ui_obj(data_val, out)
+        elif isinstance(root, dict) and "data" in root:
+            _handle_a2ui_obj(root["data"], out)
+        elif getattr(root, "file", None) is not None:
+            uri = getattr(root.file, "uri", None)
             if uri:
                 out.append({"kind": "text", "text": uri})
+        elif isinstance(root, dict) and "url" in root:
+            out.append({"kind": "text", "text": root["url"]})
     return out
 
 
@@ -234,7 +268,8 @@ async def chat(req: Request):
 
 
 # Serve the chat UI (keep this mount last so /chat wins).
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 
 if __name__ == "__main__":

@@ -70,6 +70,9 @@ def start_server() -> subprocess.Popen[str]:
     ]
     env = os.environ.copy()
     env["INTEGRATION_TEST"] = "TRUE"
+    env["GOOGLE_GENAI_USE_VERTEXAI"] = "true"
+    env["GOOGLE_CLOUD_PROJECT"] = "qwiklabs-gcp-04-b661fd22d876"
+    env["GOOGLE_CLOUD_LOCATION"] = "global"
     # Advertise a loopback URL so the A2A client can reach the card's transport.
     env["APP_URL"] = BASE_URL
     process = subprocess.Popen(

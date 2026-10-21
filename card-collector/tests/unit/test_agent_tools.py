@@ -1,15 +1,15 @@
 """Unit tests for the Card Collector agent tools."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
+
 from app.agent import (
-    list_cards,
-    get_card,
-    add_card,
-    update_card,
-    open_booster_pack,
-    lookup_external_creature,
     generate_card_artwork,
+    get_card,
+    list_cards,
+    lookup_external_creature,
+    open_booster_pack,
 )
 
 
@@ -20,7 +20,9 @@ def test_list_cards():
         mock_doc = MagicMock()
         mock_doc.id = "card_001"
         mock_doc.to_dict.return_value = {"name": "Ignis Drake", "element": "Fire"}
-        mock_db.collection.return_value.limit.return_value.stream.return_value = [mock_doc]
+        mock_db.collection.return_value.limit.return_value.stream.return_value = [
+            mock_doc
+        ]
 
         result = list_cards(limit=1)
         assert len(result) == 1
@@ -36,7 +38,9 @@ def test_get_card():
         mock_doc.exists = True
         mock_doc.id = "card_001"
         mock_doc.to_dict.return_value = {"name": "Ignis Drake", "element": "Fire"}
-        mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
+        mock_db.collection.return_value.document.return_value.get.return_value = (
+            mock_doc
+        )
 
         result = get_card("card_001")
         assert result["name"] == "Ignis Drake"
@@ -56,7 +60,11 @@ def test_open_booster_pack():
         mock_doc3 = MagicMock()
         mock_doc3.id = "c3"
         mock_doc3.to_dict.return_value = {"name": "Terra Golem", "element": "Earth"}
-        mock_db.collection.return_value.stream.return_value = [mock_doc1, mock_doc2, mock_doc3]
+        mock_db.collection.return_value.stream.return_value = [
+            mock_doc1,
+            mock_doc2,
+            mock_doc3,
+        ]
 
         pack = open_booster_pack("premium")
         assert pack["status"] == "success"
@@ -75,7 +83,10 @@ def test_lookup_external_creature():
 
 @pytest.mark.asyncio
 async def test_generate_card_artwork():
-    with patch("app.agent.GenAIClient") as mock_genai_cls, patch("app.agent.storage.Client") as mock_storage_cls:
+    with (
+        patch("app.agent.GenAIClient") as mock_genai_cls,
+        patch("app.agent.storage.Client") as mock_storage_cls,
+    ):
         # Mock GenAI response
         mock_genai_client = MagicMock()
         mock_genai_cls.return_value = mock_genai_client
@@ -100,13 +111,17 @@ async def test_generate_card_artwork():
         mock_tool_context = MagicMock()
         mock_tool_context.save_artifact = AsyncMock()
 
-        result = await generate_card_artwork("Solar Phoenix", "A majestic fire bird with glowing wings", mock_tool_context)
+        result = await generate_card_artwork(
+            "Solar Phoenix",
+            "A majestic fire bird with glowing wings",
+            mock_tool_context,
+        )
         assert result["status"] == "success"
         assert result["card_name"] == "Solar Phoenix"
-        assert "https://storage.googleapis.com/snap-tcg-cards-b661fd/cards/solar_phoenix_" in result["public_url"]
+        assert (
+            "https://storage.googleapis.com/snap-tcg-cards-b661fd/cards/solar_phoenix_"
+            in result["public_url"]
+        )
         assert result["artifact_saved"] is True
         mock_tool_context.save_artifact.assert_called_once()
         mock_blob.upload_from_string.assert_called_once()
-
-
-

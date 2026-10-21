@@ -2,9 +2,9 @@
 
 import json
 import os
+
 import google.auth
 import google.auth.transport.requests
-from google.protobuf.json_format import MessageToDict, ParseDict
 import httpx
 from a2a.client import ClientConfig, ClientFactory
 from a2a.helpers import new_text_message
@@ -17,6 +17,7 @@ from a2a.types import (
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from google.protobuf.json_format import MessageToDict, ParseDict
 
 RESOURCE = os.environ.get(
     "AGENT_ENGINE_RESOURCE_NAME",
@@ -76,10 +77,14 @@ async def _get_card(client: httpx.AsyncClient) -> AgentCard:
 def _extract_parts(parts: list) -> list[dict]:
     out: list[dict] = []
     for p in parts:
-        p_dict = MessageToDict(p) if hasattr(p, "DESCRIPTOR") else (p if isinstance(p, dict) else {})
-        if "text" in p_dict and p_dict["text"]:
+        p_dict = (
+            MessageToDict(p)
+            if hasattr(p, "DESCRIPTOR")
+            else (p if isinstance(p, dict) else {})
+        )
+        if p_dict.get("text"):
             out.append({"kind": "text", "text": p_dict["text"]})
-        elif "data" in p_dict and p_dict["data"]:
+        elif p_dict.get("data"):
             meta = p_dict.get("metadata", {})
             mime = meta.get("mimeType") if isinstance(meta, dict) else None
             data_val = p_dict["data"]
@@ -90,7 +95,7 @@ def _extract_parts(parts: list) -> list[dict]:
                     pass
             if mime == _A2UI_MIME or isinstance(data_val, dict):
                 out.append({"kind": "a2ui", "data": data_val})
-        elif "url" in p_dict and p_dict["url"]:
+        elif p_dict.get("url"):
             out.append({"kind": "text", "text": p_dict["url"]})
     return out
 
@@ -111,7 +116,9 @@ async def chat(req: Request):
             text=message,
             context_id=_contexts.get(user_id),
         )
-        send_req = SendMessageRequest(message=msg, configuration=SendMessageConfiguration())
+        send_req = SendMessageRequest(
+            message=msg, configuration=SendMessageConfiguration()
+        )
 
         async for event in a2a_client.send_message(send_req):
             if isinstance(event, tuple):
@@ -129,7 +136,9 @@ async def chat(req: Request):
                     if event.status_update.context_id:
                         _contexts[user_id] = event.status_update.context_id
                     if event.status_update.status.HasField("message"):
-                        parts.extend(_extract_parts(event.status_update.status.message.parts))
+                        parts.extend(
+                            _extract_parts(event.status_update.status.message.parts)
+                        )
                 elif event.HasField("task"):
                     if event.task.context_id:
                         _contexts[user_id] = event.task.context_id

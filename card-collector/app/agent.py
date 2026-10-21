@@ -59,7 +59,9 @@ def _get_firestore_client() -> firestore.Client:
     return firestore.Client(project=PROJECT_ID)
 
 
-def list_cards(element: str = "", rarity: str = "", limit: int = 10) -> list[dict[str, Any]]:
+def list_cards(
+    element: str = "", rarity: str = "", limit: int = 10
+) -> list[dict[str, Any]]:
     """Lists collectible cards from the catalog with optional filtering by element or rarity.
 
     Args:
@@ -160,7 +162,11 @@ def add_card(
         "in_stock": True,
     }
     db.collection(COLLECTION_NAME).document(doc_id).set(card_data)
-    return {"status": "success", "message": f"Card '{name}' added successfully.", "card": card_data}
+    return {
+        "status": "success",
+        "message": f"Card '{name}' added successfully.",
+        "card": card_data,
+    }
 
 
 def update_card(
@@ -208,7 +214,10 @@ def update_card(
 
     if updates:
         doc_ref.update(updates)
-        return {"status": "success", "message": f"Updated card '{doc_id}' with {updates}."}
+        return {
+            "status": "success",
+            "message": f"Updated card '{doc_id}' with {updates}.",
+        }
     return {"status": "no_change", "message": "No valid fields provided to update."}
 
 
@@ -258,17 +267,24 @@ def lookup_external_creature(name: str) -> dict[str, Any]:
     url = f"https://pokeapi.co/api/v2/pokemon/{clean_name}"
 
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "CardCollectorAgent/1.0"})
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "CardCollectorAgent/1.0"}
+        )
         with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read().decode())
 
         types_list = [t["type"]["name"].capitalize() for t in data.get("types", [])]
         stats = {s["stat"]["name"]: s["base_stat"] for s in data.get("stats", [])}
-        abilities = [a["ability"]["name"].replace("-", " ").capitalize() for a in data.get("abilities", [])]
+        abilities = [
+            a["ability"]["name"].replace("-", " ").capitalize()
+            for a in data.get("abilities", [])
+        ]
 
         sprites = data.get("sprites", {})
         other_sprites = sprites.get("other", {})
-        artwork = other_sprites.get("official-artwork", {}).get("front_default") or sprites.get("front_default")
+        artwork = other_sprites.get("official-artwork", {}).get(
+            "front_default"
+        ) or sprites.get("front_default")
 
         return {
             "status": "success",
@@ -315,7 +331,9 @@ async def generate_card_artwork(
     )
 
     try:
-        genai_client = GenAIClient(vertexai=True, project=PROJECT_ID, location=IMAGE_LOCATION)
+        genai_client = GenAIClient(
+            vertexai=True, project=PROJECT_ID, location=IMAGE_LOCATION
+        )
         response = genai_client.models.generate_content(
             model=IMAGE_MODEL,
             contents=prompt,
@@ -326,7 +344,11 @@ async def generate_card_artwork(
 
         image_bytes = None
         mime_type = "image/jpeg"
-        if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+        if (
+            response.candidates
+            and response.candidates[0].content
+            and response.candidates[0].content.parts
+        ):
             for part in response.candidates[0].content.parts:
                 if part.inline_data and part.inline_data.data:
                     image_bytes = part.inline_data.data
@@ -343,14 +365,18 @@ async def generate_card_artwork(
         # 1. Save artifact for playground UI if tool_context is provided
         if tool_context is not None:
             try:
-                artifact_part = types.Part(inline_data=types.Blob(mime_type=mime_type, data=image_bytes))
+                artifact_part = types.Part(
+                    inline_data=types.Blob(mime_type=mime_type, data=image_bytes)
+                )
                 await tool_context.save_artifact(filename, artifact_part)
                 artifact_saved = True
             except Exception:
                 pass
 
         # 2. Upload to Cloud Storage bucket for permanent public URL
-        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
+        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y%m%d%H%M%S"
+        )
         blob_path = f"cards/{clean_name}_{timestamp}.jpg"
         storage_client = storage.Client(project=PROJECT_ID)
         bucket = storage_client.bucket(IMAGE_BUCKET_NAME)
@@ -421,7 +447,9 @@ async def generate_card_video(
 
         resp = authed_session.post(url, json=payload, timeout=180)
         if resp.status_code != 200:
-            return {"error": f"Interactions API returned status {resp.status_code}: {resp.text}"}
+            return {
+                "error": f"Interactions API returned status {resp.status_code}: {resp.text}"
+            }
 
         data = resp.json()
         video_bytes = None
@@ -448,14 +476,18 @@ async def generate_card_video(
         # 1. Save artifact for playground UI if tool_context is provided
         if tool_context is not None:
             try:
-                artifact_part = types.Part(inline_data=types.Blob(mime_type=mime_type, data=video_bytes))
+                artifact_part = types.Part(
+                    inline_data=types.Blob(mime_type=mime_type, data=video_bytes)
+                )
                 await tool_context.save_artifact(filename, artifact_part)
                 artifact_saved = True
             except Exception:
                 pass
 
         # 2. Upload to Cloud Storage bucket for permanent public URL
-        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
+        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y%m%d%H%M%S"
+        )
         blob_path = f"videos/{clean_name}_{timestamp}.mp4"
         storage_client = storage.Client(project=PROJECT_ID)
         bucket = storage_client.bucket(IMAGE_BUCKET_NAME)
@@ -505,7 +537,7 @@ def _build_a2ui_instruction() -> str:
         "- Use ONLY these components: Card, Column, Row, Text, Divider, and Image. Do not use "
         "Table or Heading (unsupported), or Buttons, actions, or forms (they do nothing in adk web).\n"
         "- Always include an Image component inside each card whenever a card has an `image_url` (from open_booster_pack, list_cards, get_card, generate_card_artwork, or lookup_external_creature). "
-        "Set the Image url to that exact https link: {\"Image\": {\"url\": {\"literalString\": \"https://...\"}}}. "
+        'Set the Image url to that exact https link: {"Image": {"url": {"literalString": "https://..."}}}. '
         "Never point an Image at a bare filename, an artifact name, or a non-http(s) path. If you do not have a public URL, add a short Text line noting the image instead.\n"
         "- No markdown in text; use the usageHint property ('h1', 'h2', 'body') for headings and emphasis.\n"
         "- Output A2UI JSON array wrapped in <a2ui-json>...</a2ui-json> tags.\n"

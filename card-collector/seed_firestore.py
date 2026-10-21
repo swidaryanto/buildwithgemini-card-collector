@@ -130,7 +130,9 @@ def seed_database():
     for card in SAMPLE_CARDS:
         doc_id = card["id"]
         collection_ref.document(doc_id).set(card)
-        print(f"  ✓ Added card: {card['name']} ({card['rarity']} - {card['element']}) [ID: {doc_id}]")
+        print(
+            f"  ✓ Added card: {card['name']} ({card['rarity']} - {card['element']}) [ID: {doc_id}]"
+        )
 
     print(f"\nSuccessfully seeded {len(SAMPLE_CARDS)} cards into Firestore!")
 

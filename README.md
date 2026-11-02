@@ -1,3 +1,117 @@
+# Card Collector
+
+Card Collector is a chat companion for a catalog of collectible creature cards. A Gemini agent (`gemini-2.5-flash` on the [Agent Development Kit](https://google.github.io/adk-docs/)) lists, fetches, adds, and updates cards in a Firestore `cards` collection, draws a three-card booster from that catalog, looks up creature stats on the public PokéAPI, and generates card artwork and a short card video that it uploads to Cloud Storage. The chat page shows plain-text replies and [A2UI](https://adk.dev/integrations/a2ui/) cards.
+
+**Demo:** [demo_video.mp4](demo_video.mp4)
+
+**Live app:** [card-collector-frontend-689344436861.us-east1.run.app](https://card-collector-frontend-689344436861.us-east1.run.app) (recorded in [`card-collector/README.md`](card-collector/README.md))
+
+## Key features
+
+- **Card catalog.** `list_cards` filters the Firestore `cards` collection by element (`Fire`, `Water`, `Earth`, `Electric`, `Dark`, `Wind`, `Nature`, `Cosmic`) and rarity (`Common`, `Uncommon`, `Rare`, `Epic`, `Legendary`, `Mythic`). `get_card` loads one card by document id or name (`hp`, `attack`, `defense`, `speed`, ability, price, description). `add_card` inserts a card. `update_card` changes `price`, `in_stock`, or `ability`.
+- **Booster packs.** `open_booster_pack` draws three random cards from the catalog (fewer when the catalog is smaller) and returns them with the requested `pack_type` label.
+- **External creatures.** `lookup_external_creature` reads stats, types, abilities, height, weight, and official artwork from [PokéAPI](https://pokeapi.co/).
+- **Artwork and video.** `generate_card_artwork` calls Vertex AI `gemini-3.1-flash-lite-image`, saves an ADK artifact when a tool context is present, and uploads a JPEG to bucket `snap-tcg-cards-b661fd`. `generate_card_video` calls `gemini-omni-flash-preview` and uploads an MP4 to the same bucket.
+- **Rich replies.** An after-model callback (`a2ui_callback`) turns A2UI v0.8 JSON into cards the dev UI and the chat page can render (`Card`, `Column`, `Row`, `Text`, `Divider`, `Image`).
+- **Chat page.** `card-collector/frontend` is a FastAPI proxy and a static page. The document title is `🎴 Card Collector — TCG AI Companion`. The browser talks only to the proxy; the proxy sends messages to the deployed agent over A2A. Prompt chips open a booster, browse rare cards, generate artwork, and generate a card video.
+- **Memory hooks.** The agent registers `PreloadMemoryTool` and an after-agent callback that calls `add_session_to_memory`. Local sessions use the in-memory session service. Set `SESSION_SERVICE_URI`, or `GOOGLE_CLOUD_AGENT_ENGINE_ID` with `GOOGLE_CLOUD_PROJECT`, to select another session backend (`app/app_utils/services.py`).
+
+`card-collector/seed_firestore.py` can load the sample catalog (Ignis Drake, Aqua Siren, and the other creatures in that file) into Firestore project `qwiklabs-gcp-04-b661fd22d876`.
+
+## Tech stack
+
+| Piece | What this repo uses |
+| --- | --- |
+| Language | Python `>=3.11,<3.14` (`card-collector/pyproject.toml`) |
+| Agent | Google ADK (`google-adk`), model `gemini-2.5-flash` |
+| Agent server | FastAPI and uvicorn (`card-collector/app/fast_api_app.py`), A2A routes |
+| Catalog | Cloud Firestore collection `cards` |
+| Media | Cloud Storage bucket `snap-tcg-cards-b661fd` |
+| Image and video models | `gemini-3.1-flash-lite-image`, `gemini-omni-flash-preview` |
+| Rich UI | `a2ui-agent-sdk` (A2UI v0.8) |
+| Chat frontend | FastAPI, `a2a-sdk`, and static HTML in `card-collector/frontend` |
+| Packages | `uv` with `card-collector/uv.lock` (the agent image installs `uv==0.8.13`) |
+| Deploy target | Agent Runtime in `us-east1`, A2A enabled (`card-collector/agents-cli-manifest.yaml`, `card-collector/deployment_metadata.json`) |
+
+Firestore, Cloud Storage, and the image and video calls use project `qwiklabs-gcp-04-b661fd22d876`, hardcoded in `card-collector/app/agent.py`. The deployed reasoning engine id is `projects/689344436861/locations/us-east1/reasoningEngines/5848463976349827072`.
+
+## Run it locally
+
+### Agent
+
+Install locked dependencies and start the server the same way the agent image does (`card-collector/Dockerfile`):
+
+```bash
+cd card-collector
+uv sync --frozen
+uv run uvicorn app.fast_api_app:app --host 0.0.0.0 --port 8080
+```
+
+`app/fast_api_app.py` calls `load_dotenv()`, so copy [`card-collector/.env.example`](card-collector/.env.example) to `card-collector/.env`. That file is the Vertex AI setup, which is also what `tests/integration/test_server_e2e.py` exports:
+
+```bash
+GOOGLE_GENAI_USE_VERTEXAI=true
+GOOGLE_CLOUD_PROJECT=your-gcp-project-id
+GOOGLE_CLOUD_LOCATION=global
+```
+
+To call Gemini through AI Studio instead, comment out those three lines and set the key shown in the same example file:
+
+```bash
+GEMINI_API_KEY=your-api-key-here
+```
+
+Catalog and media tools use Application Default Credentials against the hardcoded project id above. `tests/integration/test_server_e2e.py` starts the same app on port 8000:
+
+```bash
+python -m uvicorn app.fast_api_app:app --host 0.0.0.0 --port 8000
+```
+
+Seed the sample catalog (same project id as `seed_firestore.py`):
+
+```bash
+uv run python seed_firestore.py
+```
+
+The agent server also reads these variables. Leave them unset for a local in-memory session:
+
+| Variable | Read in | Effect |
+| --- | --- | --- |
+| `APP_URL` | `app/app_utils/a2a.py` | URL advertised on the A2A agent card |
+| `ALLOW_ORIGINS` | `app/fast_api_app.py` | Comma-separated CORS origins |
+| `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY` | `app/fast_api_app.py` | `true` or `1` exports traces |
+| `SESSION_SERVICE_URI` | `app/app_utils/services.py` | Session backend URI |
+| `GOOGLE_CLOUD_AGENT_ENGINE_ID` | `app/app_utils/services.py`, `app/app_utils/a2a.py` | Vertex AI sessions, and the engine id used to build the card URL |
+| `GOOGLE_CLOUD_AGENT_ENGINE_LOCATION` | `app/app_utils/services.py`, `app/app_utils/a2a.py` | Agent engine region (`us-east1` when unset for the card URL) |
+| `LOGS_BUCKET_NAME` | `app/app_utils/services.py` | Cloud Storage bucket for artifacts |
+| `AGENT_VERSION` | `app/app_utils/a2a.py` | Version on the agent card (default `0.1.0`; the image also sets it from a build arg) |
+
+### Chat frontend
+
+From `card-collector/frontend`, install `requirements.txt` and start `main.py` (the run steps in that file). Defaults for `AGENT_ENGINE_RESOURCE_NAME`, `AGENT_DIRECTORY` (`app`), and `PORT` (`8080`) are in `frontend/main.py`. The process uses Application Default Credentials to call the deployed agent.
+
+```bash
+cd card-collector/frontend
+pip install -r requirements.txt
+python main.py
+```
+
+Open `http://localhost:8080`. Override the defaults with:
+
+```bash
+export AGENT_ENGINE_RESOURCE_NAME="projects/689344436861/locations/us-east1/reasoningEngines/5848463976349827072"
+export AGENT_DIRECTORY="app"
+export PORT=8080
+```
+
+`AGENT_DIRECTORY` matches `agent_directory` in `card-collector/agents-cli-manifest.yaml`. The frontend image runs the same app with `uvicorn main:app --host 0.0.0.0 --port 8080` (`card-collector/frontend/Dockerfile`).
+
+---
+
+## About the Track 3 starter kit
+
+The sections below are the Build with Gemini Track 3 starter kit and project gallery this repo was cloned from.
+
 <div align="center">
 
 <img src="assets/build-with-gemini-banner.png" alt="Build with Gemini" width="100%" />
